@@ -1,5 +1,3 @@
-# Bitacora-LAB-3
-Lab 3
 # Bitácora grupal — Puente H con PWM
 
 **Grupo:** _(G9 / G10, nombres de los integrantes)_
@@ -113,7 +111,6 @@ La ficha pide que el motor responda **mientras se mantienen presionados** los pu
 |---|---|
 | `fwd_n`, `rev_n` | Sentido adelante / atrás (activos en bajo) |
 | `v1_n`, `v2_n`, `v3_n` | Velocidad 1 (40 %), 2 (70 %), 3 (100 %) (activos en bajo) |
-| `rst_n` | Reset (activo en bajo) |
 
 **Decisiones de diseño que hay que documentar** (la ficha pide que estén definidas):
 
@@ -125,19 +122,20 @@ La ficha pide que el motor responda **mientras se mantienen presionados** los pu
 | `fwd` y `rev` a la vez | Detenido | |
 | Varias velocidades a la vez | Gana la mayor (codificador de prioridad) | |
 | Cambio de sentido a toda velocidad | Cambio directo en el alcance base; parada automática = mejora | |
+| Sin reset | El diseño no tiene entrada de reset: el estado inicial se fija con valor inicial en `cnt` y `ena` (ver 4.1). Registrar en 4.3 qué avisos da Yosys y justificar la decisión | |
 
 ### 3.3 Tabla de variables (etapa 2) — **predicción de flip-flops**
 
 | Variable | Tipo | Valores | Unidad | ¿Se recuerda? | Flip-flops |
 |---|---|---|---|---|---|
 | `clk` | Entrada | — | — | — | — |
-| `rst_n`, `fwd_n`, `rev_n`, `v1_n`, `v2_n`, `v3_n` | Entrada externa | 0/1 | — | Se sincronizan (2 flip-flops c/u) | 12 |
+| `fwd_n`, `rev_n`, `v1_n`, `v2_n`, `v3_n` | Entrada externa | 0/1 | — | Se sincronizan (2 flip-flops c/u) | 10 |
 | `in1`, `in2` | Salida | 0/1 | — | No: combinacional desde las entradas sincronizadas | 0 |
 | `t_on` | Interna | 0, T40, T70, T100 | ciclos | No: se elige en cada instante | 0 |
 | `cnt` | Interna | 0 a M − 1 | ciclos | **Sí**: la cuenta avanza | 15 |
 | `fin` | Interna | 0/1 | — | No: comparación | 0 |
 | `ena` | Salida | 0/1 | — | **Sí**: salida de la PWM registrada (sin glitches) | 1 |
-| | | | | **Total predicho** | **28** |
+| | | | | **Total predicho** | **26** |
 
 _Fecha y hora en que se escribió esta predicción: ___ (antes de ejecutar Yosys)._ Si cambian el diseño, rehagan la tabla y registren la fecha.
 
@@ -161,7 +159,6 @@ Experimento S4 (anticipado): con `F_PWM` = 20 kHz, M = 1 250 y el contador neces
 ```mermaid
 flowchart LR
     CLK(["clk"]) --> B["puente_h_pwm"]
-    RST(["rst_n"]) --> B
     FWD(["fwd_n, rev_n"]) --> B
     VEL(["v1_n, v2_n, v3_n"]) --> B
     B --> IN(["in1, in2"])
@@ -179,18 +176,15 @@ flowchart LR
 | E7 | Sin pulsadores: `ena = 0`, `in1 = in2 = 0` | Comprobación directa | Motor detenido |
 | E8 | `fwd` y `rev` a la vez: motor detenido | Comprobación directa | Motor detenido |
 | E9 | Dos velocidades a la vez: gana la mayor | Comprobación de duty | Medición |
-| E10 | Reset: motor detenido y cuenta en 0 | Comprobación directa | Observación |
-| E11 | Ciclo de trabajo mínimo con el que el motor arranca | — | **Solo en la tarjeta**: registrar valor medido |
+| E10 | Ciclo de trabajo mínimo con el que el motor arranca | — | **Solo en la tarjeta**: registrar valor medido |
 
-_(Ajusten E1 a E10 si el profesor asigna otros parámetros.)_
+_(Ajusten E1 a E9 si el profesor asigna otros parámetros.)_
 
 ### 3.6 Diagrama de flujo (etapa 5)
 
 ```mermaid
 flowchart TD
-    A([Inicio]) --> B{¿reset?}
-    B -- Sí --> C[cnt = 0<br/>ena = 0]
-    B -- No --> D{¿velocidad?}
+    A([Inicio]) --> D{¿velocidad?}
     D -- v3 --> E3[t_on = T100]
     D -- v2 --> E2[t_on = T70]
     D -- v1 --> E1[t_on = T40]
@@ -207,9 +201,8 @@ flowchart TD
     I -- No --> K[cnt = cnt + 1]
     J --> L[ena = mover AND cnt < t_on]
     K --> L
-    C --> M[Esperar siguiente flanco]
-    L --> M
-    M --> B
+    L --> M[Esperar siguiente flanco]
+    M --> D
 ```
 
 _(Verifiquen que cubre todos los casos de la tabla de decisiones de 3.2. Si lo redibujan a mano o en otra herramienta, inserten su versión.)_
@@ -236,7 +229,7 @@ _(Verifiquen que cubre todos los casos de la tabla de decisiones de 3.2. Si lo r
 
 ### 3.8 Diagrama de bloques con nombres y anchos
 
-Dibujen el suyo (equivalente a la imagen 1 del profesor) con: sincronizadores (6 × 2 FF) → selector de giro (`in1`, `in2`) · selector de velocidad (`t_on`, ANCHO bits) → contador de periodo (ANCHO bits, `fin`) → comparador `cnt < t_on` → registro `ena`. _(Insertar imagen)_
+Dibujen el suyo (equivalente a la imagen 1 del profesor) con: sincronizadores (5 × 2 FF) → selector de giro (`in1`, `in2`) · selector de velocidad (`t_on`, ANCHO bits) → contador de periodo (ANCHO bits, `fin`) → comparador `cnt < t_on` → registro `ena`. _(Insertar imagen)_
 
 ---
 
@@ -252,11 +245,10 @@ module puente_h_pwm #(
     parameter F_PWM    = 1_000
 )(
     input  wire clk,
-    input  wire rst_n,
     input  wire fwd_n, rev_n,
     input  wire v1_n, v2_n, v3_n,
     output wire in1, in2,
-    output reg  ena
+    output reg  ena = 1'b0          // valor inicial: no hay reset
 );
     // Cuentas (etapa 3)
     localparam M     = CLK_FREQ / F_PWM;
@@ -265,13 +257,12 @@ module puente_h_pwm #(
     localparam T100  = M;
     localparam ANCHO = $clog2(M);
 
-    // Entradas externas: invertir y sincronizar (12 flip-flops)
-    reg [5:0] meta, sync;
+    // Entradas externas: invertir y sincronizar (10 flip-flops)
+    reg [4:0] meta, sync;
     always @(posedge clk) begin
-        meta <= ~{rst_n, fwd_n, rev_n, v1_n, v2_n, v3_n};
+        meta <= ~{fwd_n, rev_n, v1_n, v2_n, v3_n};
         sync <= meta;
     end
-    wire rst = sync[5];
     wire fwd = sync[4];
     wire rev = sync[3];
     wire v1  = sync[2];
@@ -286,18 +277,17 @@ module puente_h_pwm #(
     wire [ANCHO-1:0] t_on = v3 ? T100 : v2 ? T70 : v1 ? T40 : {ANCHO{1'b0}};
 
     // Contador del periodo (ANCHO flip-flops)
-    reg [ANCHO-1:0] cnt;
+    reg [ANCHO-1:0] cnt = 0;        // valor inicial: no hay reset
     wire fin = (cnt >= M - 1);
     always @(posedge clk) begin
-        if (rst || fin) cnt <= 0;
-        else            cnt <= cnt + 1;
+        if (fin) cnt <= 0;
+        else     cnt <= cnt + 1;
     end
 
     // PWM registrada (1 flip-flop)
     wire mover = (in1 | in2) & (v1 | v2 | v3);
     always @(posedge clk) begin
-        if (rst) ena <= 1'b0;
-        else     ena <= mover & (cnt < t_on);
+        ena <= mover & (cnt < t_on);
     end
 endmodule
 ```
@@ -306,23 +296,23 @@ endmodule
 
 | Diagrama de flujo | Código | ¿Se recuerda? |
 |---|---|---|
-| Rombo "¿reset?" | `if (rst ...)` en los dos `always` | — |
 | Rombo "¿velocidad?" y acciones `t_on = ...` | `wire t_on = v3 ? ... : v2 ? ... : ...` | No |
 | Rombo "¿un sentido y alguna velocidad?" | `assign in1/in2` y `wire mover` | No |
 | Rombo "¿cnt ≥ M − 1?" | `wire fin = (cnt >= M - 1)` | No |
 | Acciones sobre `cnt` | `always @(posedge clk)` con `<=` | Sí |
 | `ena = mover AND cnt < t_on` | `always @(posedge clk)` con `ena <=` | Sí |
 | "Esperar el siguiente flanco" | Implícito en `posedge clk` | — |
+| "Inicio" (sin reset) | Valores iniciales `cnt = 0` y `ena = 1'b0` en la declaración | — |
 
 _(Expliquen con sus palabras por qué `>=` y no `==`, y por qué `ena` es registrada.)_
 
 ### 4.3 Experimento S1 — predicción vs. síntesis
 
-La predicción se escribió **antes** en 3.3 (28 flip-flops). Predicción de bloques _(completar antes de ejecutar)_:
+La predicción se escribió **antes** en 3.3 (26 flip-flops). Predicción de bloques _(completar antes de ejecutar)_:
 
 | Elemento | Predicción | Resultado de Yosys | Explicación de la diferencia |
 |---|---|---|---|
-| Flip-flops | 28 (12 sync + 15 `cnt` + 1 `ena`) | | |
+| Flip-flops | 26 (10 sync + 15 `cnt` + 1 `ena`) | | |
 | Sumadores / restadores | 1 sumador (`cnt + 1`); el `M − 1` es constante | | |
 | Comparadores | 1 de magnitud `cnt < t_on` (variable); `cnt >= M-1` contra constante | | |
 | Multiplexores | 1 cadena para `t_on` (selección entre constantes) | | |
@@ -381,7 +371,6 @@ Propuestas (elijan una o ambas): `==` vs. `>=` en el reinicio del contador; `cas
 | Sin pulsadores | E7 | ninguno | `ena = 0`, `in1 = in2 = 0` | |
 | Ambos sentidos | E8 | `fwd` + `rev` | Detenido | |
 | Varias velocidades | E9 | `v1` + `v3` | Gana la mayor | |
-| Reset | E10 | `rst_n = 0` | Detenido, `cnt = 0` | |
 
 ### 5.3 Evidencia
 
@@ -400,7 +389,6 @@ Comando: `make sim` (equivale a `iverilog -o sim.vvp tb_... src/...; vvp sim.vvp
 | Señal del top | Dirección | Pin de la FPGA | Conector y pin físico | Conectado a |
 |---|---|---|---|---|
 | `clk` | Entrada | | | Oscilador |
-| `rst_n` | Entrada | | | Pulsador de reset |
 | `fwd_n` | Entrada | | | Pulsador |
 | `rev_n` | Entrada | | | Pulsador |
 | `v1_n`, `v2_n`, `v3_n` | Entrada | | | Pulsadores |
@@ -432,8 +420,8 @@ Esquema o foto con **fuente externa y tierra común visibles**: _(insertar)_
 | E3 | | | |
 | E4 | | | |
 | E5, E6 | | | |
-| E7, E8, E9, E10 | | | |
-| E11 (duty mínimo de arranque) | | | |
+| E7, E8, E9 | | | |
+| E10 (duty mínimo de arranque) | | | |
 
 Se recomienda probar primero con LEDs y luego con el motor. Comando: `make clean syn conf`.
 
@@ -470,8 +458,8 @@ Qué se pidió: ___ · qué se recalculó: ___ · resultado: ___
 | E2 | 40 % | | | |
 | E3 | 70 % | | | |
 | E4 | 100 % | | | |
-| E5 a E10 | | | | |
-| E11 | — | — | | |
+| E5 a E9 | | | | |
+| E10 (duty mínimo de arranque) | — | — | | |
 
 ### 7.2 Problemas encontrados y soluciones
 
